@@ -1,0 +1,9 @@
+flask==1.0.2
+Flask-SQLAlchemy==2.3.2
+ujson==1.35
+sqlalchemy
+flask-redis
+requests
+pytz
+mysqlclient
+flask-migrate
