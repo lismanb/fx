@@ -1,0 +1,52 @@
+version: '3'
+services:
+  mysql:
+    image: mysql:tag
+    build:
+      context: ./mysql
+      dockerfile: Dockerfile
+    volumes:
+      - ./mysql/data:/opt/mysql
+    ports:
+      - 3306:3306
+    environment:
+      - MYSQL_DATABASE=transactions
+      - MYSQL_USER=fxuser
+      - MYSQL_PASSWORD=fxuserpass
+      - MYSQL_ROOT_PASSWORD=fxuserpass
+  redis:
+    image: redis:tag
+    build:
+      context: ./redis
+      dockerfile: Dockerfile
+    volumes:
+      - ./redis/data:/opt/redis
+    ports:
+      - 6379:6379
+  flask:
+    image: flask:tag
+    build:
+      context: ../../fx
+      dockerfile: ./docker/flask/Dockerfile
+    volumes:
+      - ./flask/data:/opt/flask
+    depends_on:
+      - mysql
+      - redis
+    ports:
+      - 5000:5000
+    environment:
+      - FXRATES_SETTINGS=conf/fxrates.cfg
+      - FLASK_APP=fx.fxrates
+  frontend:
+    image: nginx:tag
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./flask/public:/usr/share/nginx/html:ro
+    depends_on:
+      - flask
+    ports:
+      - 80:80

@@ -1,6 +1,6 @@
 DROP TABLE IF EXISTS transactions;
 
-CREATE TABLE transactions (
+CREATE TABLE IF NOT EXISTS transactions (
   id INTEGER PRIMARY KEY AUTO_INCREMENT,
   currency CHAR(3) NOT NULL ,
   rate FLOAT NOT NULL ,
