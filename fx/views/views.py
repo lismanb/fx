@@ -8,6 +8,8 @@ import pytz
 import datetime
 from fx.common import cache
 from sqlalchemy import desc
+from fx.models.storage import Transactions
+from fx.database.db import session_scope
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +20,18 @@ http_session = requests.session()
 def safe_to_float(obj):
     try:
         return float(obj)
+    except Exception as e:
+        logger.debug(repr(e))
+
+
+def safe_to_int(obj):
+    """
+    returns the integer value or none
+    :param obj:
+    :return:
+    """
+    try:
+        return int(obj)
     except Exception as e:
         logger.debug(repr(e))
 
@@ -58,8 +72,8 @@ def validate_get_request(data):
     elif "currency" in data:
         return None, errors.INVALID_SYMBOL
 
-    if "limit" in data and type(safe_to_float(data["limit"])) in (int, float):
-        resp["limit"] = safe_to_float(data["limit"])
+    if "limit" in data and type(safe_to_int(data["limit"])) is int:
+        resp["limit"] = safe_to_int(data["limit"])
     elif "limit" in data:
         return None, errors.INVALID_AMOUNT
 
@@ -68,10 +82,6 @@ def validate_get_request(data):
 
 @bp.route('/grab_and_save', methods=["POST"])
 def save_rate():
-    # circular dependency hack
-    from fx.models.storage import Storage
-    from fx.fxrates import db
-
     try:
         if request.is_json is False:
             return ujson.dumps(errors.BAD_REQUEST), 400
@@ -87,35 +97,28 @@ def save_rate():
                                                                              currency))
         oxr_data = oxr_resp.json()
 
-        # save to the database
-        st = Storage(
-            currency=currency,
-            amount=amount,
-            rate=oxr_data["rates"][currency],
-            rate_at=pytz.utc.localize(datetime.datetime.utcfromtimestamp(oxr_data["timestamp"])),
-            created_at=pytz.utc.localize(datetime.datetime.utcnow()))
-        st.amount_usd = round(amount * oxr_data["rates"][currency], 9)
+        with session_scope() as session:
+            # save to the database
+            st = Transactions(
+                currency=currency,
+                amount=amount,
+                rate=oxr_data["rates"][currency],
+                rate_at=pytz.utc.localize(datetime.datetime.utcfromtimestamp(oxr_data["timestamp"])),
+                created_at=pytz.utc.localize(datetime.datetime.utcnow()))
+            st.amount_usd = round(amount * oxr_data["rates"][currency], 9)
 
-        session = db.session()
-        try:
             session.add(st)
             session.commit()
-        except Exception as e:
-            session.rollback()
-            logger.exception(e)
-            raise
-        finally:
-            session.close()
 
-        # write to redis
-        cache.save_to_redis({
-            "currency": currency,
-            "amount_usd": st.amount_usd,
-            "amount": st.amount,
-            "rate_at": st.rate_at,
-            "rate": st.rate,
-            "created_at": st.created_at,
-        })
+            # write to redis
+            cache.save_to_redis({
+                "currency": currency,
+                "amount_usd": st.amount_usd,
+                "amount": st.amount,
+                "rate_at": st.rate_at,
+                "rate": st.rate,
+                "created_at": st.created_at,
+            })
 
         return "{}", 201
 
@@ -143,41 +146,33 @@ def make_dict(storage_obj):
 @bp.route('/last', methods=["GET"])
 def get_last_transactions():
     # circular dependency hack
-    from fx.models.storage import Storage
-    from fx.fxrates import db
 
     try:
         data, error = validate_get_request(request.args)
         if error:
             return ujson.dumps(error), 400
 
-        currency = data.get("currency").upper()
+        currency = data.get("currency", '').upper()
         limit = data.get("limit", 1)
         if limit > 100:
             limit = 100
 
-        session = db.session()
-        data = []
-        try:
-            if currency is not None:
-                db_data = session.query(Storage).filter(currency==currency).order_by(desc(Storage.created_at)).limit(limit).all()
+        with session_scope() as session:
+            if currency:
+                db_data = session.query(Transactions).filter(currency==currency).order_by(desc(Transactions.created_at)).limit(limit).all()[:]
                 redis_data = cache.get_data(currency, limit)
             else:
-                db_data = session.query(Storage).order_by(desc(Storage.created_at)).limit(limit).all()
+                db_data = session.query(Transactions).order_by(desc(Transactions.created_at)).limit(limit).all()[:]
                 redis_data = cache.get_data("transactions", limit)
-        except Exception as e:
-            session.rollback()
-            logger.exception(e)
-            raise
 
-        db_data = [make_dict(item) for item in db_data]
+            db_data = [make_dict(item) for item in db_data]
 
-        return {
+        return ujson.dumps({
             "request": request.args,
             "data":[
                 {"source": "mysql", "transactions": db_data},
                 {"source": "redis", "transactions": redis_data}
-            ]}
+            ]}), 200
 
     except Exception as e:
         logger.exception(e)

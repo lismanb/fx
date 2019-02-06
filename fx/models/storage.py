@@ -1,8 +1,9 @@
 from sqlalchemy import Column, Integer, String, Numeric, DateTime
-from fx.fxrates import db
+from flask_sqlalchemy import SQLAlchemy
+db = SQLAlchemy()
 
-class Storage(db.Model):
-    __tablename__ = 'storage'
+class Transactions(db.Model):
+    __tablename__ = 'transactions'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     currency = Column(String(3), index=True, nullable=False)

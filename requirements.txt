@@ -6,4 +6,3 @@ flask-redis
 requests
 pytz
 mysqlclient
-flask-migrate

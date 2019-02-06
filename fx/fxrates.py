@@ -4,29 +4,48 @@ from flask_redis import FlaskRedis
 from fx.common import errors
 from fx.views import views
 import ujson
+import click
+from flask.cli import with_appcontext
+from flask import current_app
 
 
-app = Flask(__name__)
-app.config.from_envvar('FXRATES_SETTINGS')
+db = SQLAlchemy()
+redis_store = FlaskRedis()
 
-db = SQLAlchemy(app)
-redis_store = FlaskRedis(app)
-
-app.register_blueprint(views.bp, url_prefix='/fx')
-
-@app.errorhandler(404)
-def not_found(status):
-    return ujson.dumps(errors.RESOURCE_NOT_FOUND), 404
-
-@app.errorhandler(405)
-def method_not_allowed(status):
-    return ujson.dumps(errors.METHOD_NOT_ALLOWED), 405
-
-redis_store.init_app(app)
-db.init_app(app)
+def init_db(app):
+    """Clear existing data and create new tables."""
+    with app.open_resource('database/init_schema.sql') as f:
+        db.session.execute(f.read().decode('utf8'))
 
 
-if __name__ == '__main__':
-    from flask_migrate import Migrate
-    Migrate(app, db)
-    app.run()
+@click.command('init-db')
+@with_appcontext
+def init_db_command():
+    """Clear existing data and create new tables."""
+    init_db(current_app)
+    click.echo('Initialized the database.')
+
+
+def create_app():
+    app = Flask(__name__)
+    app.config.from_envvar('FXRATES_SETTINGS')
+    db.init_app(app)
+    redis_store.init_app(app)
+
+    app.register_blueprint(views.bp, url_prefix='/fx')
+
+    @app.errorhandler(404)
+    def not_found(status):
+        return ujson.dumps(errors.RESOURCE_NOT_FOUND), 404
+
+    @app.errorhandler(405)
+    def method_not_allowed(status):
+        return ujson.dumps(errors.METHOD_NOT_ALLOWED), 405
+
+    @app.errorhandler(500)
+    def method_not_allowed(status):
+        return ujson.dumps(errors.INTERNAL_SERVER_ERROR), 500
+
+    app.cli.add_command(init_db_command)
+
+    return app
