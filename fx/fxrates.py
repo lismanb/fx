@@ -26,9 +26,15 @@ def init_db_command():
     click.echo('Initialized the database.')
 
 
-def create_app():
+def create_app(conf=None):
     app = Flask(__name__)
     app.config.from_envvar('FXRATES_SETTINGS')
+
+    #  overwritting settings for testing purposes
+    if conf and type(conf) is dict:
+        for k in conf:
+            app.config[k] = conf[k]
+
     db.init_app(app)
     redis_store.init_app(app)
 

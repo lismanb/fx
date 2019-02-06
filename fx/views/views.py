@@ -1,15 +1,17 @@
 # coding=utf-8
-from flask import Blueprint, request, current_app
-import logging
-from fx.common import errors
-import ujson
-import requests
-import pytz
 import datetime
-from fx.common import cache
+import logging
+import ujson
+from flask import Response
+import pytz
+import requests
+from flask import Blueprint, request, current_app
 from sqlalchemy import desc
-from fx.models.storage import Transactions
+
+from fx.common import cache
+from fx.common import errors
 from fx.database.db import session_scope
+from fx.models.storage import Transactions
 
 logger = logging.getLogger(__name__)
 
@@ -84,11 +86,11 @@ def validate_get_request(data):
 def save_rate():
     try:
         if request.is_json is False:
-            return ujson.dumps(errors.BAD_REQUEST), 400
+            return Response(ujson.dumps(errors.BAD_REQUEST), 400, content_type='application/json')
 
         data, error = validate_post_request(request.json)
         if error:
-            return ujson.dumps(error), 400
+            return Response(ujson.dumps(error), 400, content_type='application/json')
 
         currency = data.get("currency").upper()
         amount = data.get("amount")
@@ -120,11 +122,11 @@ def save_rate():
                 "created_at": st.created_at,
             })
 
-        return "{}", 201
+        return Response("{}", 201, content_type='application/json')
 
     except Exception as e:
         logger.exception(e)
-        return ujson.dumps(errors.INTERNAL_SERVER_ERROR), 500
+        return Response(ujson.dumps(errors.INTERNAL_SERVER_ERROR), 500, content_type='application/json')
 
 def make_dict(storage_obj):
     """
@@ -136,6 +138,7 @@ def make_dict(storage_obj):
     resp["created_at"] = storage_obj.created_at
     resp["created_at"] = storage_obj.created_at
     resp["rate"] = storage_obj.rate
+    resp["rate_at"] = storage_obj.rate_at
     resp["currency"] = storage_obj.currency
     resp["amount"] = storage_obj.amount
     resp["amount_usd"] = storage_obj.amount_usd
@@ -150,7 +153,7 @@ def get_last_transactions():
     try:
         data, error = validate_get_request(request.args)
         if error:
-            return ujson.dumps(error), 400
+            return Response(ujson.dumps(error), 400, content_type='application/json')
 
         currency = data.get("currency", '').upper()
         limit = data.get("limit", 1)
@@ -163,17 +166,17 @@ def get_last_transactions():
                 redis_data = cache.get_data(currency, limit)
             else:
                 db_data = session.query(Transactions).order_by(desc(Transactions.created_at)).limit(limit).all()[:]
-                redis_data = cache.get_data("transactions", limit)
+                redis_data = cache.get_data("transactions", limit-1)
 
             db_data = [make_dict(item) for item in db_data]
 
-        return ujson.dumps({
+        return Response(ujson.dumps({
             "request": request.args,
             "data":[
                 {"source": "mysql", "transactions": db_data},
                 {"source": "redis", "transactions": redis_data}
-            ]}), 200
+            ]}), 200, content_type='application/json')
 
     except Exception as e:
         logger.exception(e)
-        return ujson.dumps(errors.INTERNAL_SERVER_ERROR), 500
+        return Response(ujson.dumps(errors.INTERNAL_SERVER_ERROR), 500, content_type='application/json')
